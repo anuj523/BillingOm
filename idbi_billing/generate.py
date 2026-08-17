@@ -68,6 +68,7 @@ def build_billing(
         out_path=out_path,
         sheet_title=month_label,
         footer_note=NOTE_TEXT.format(month=month_label),
+        account_group=group.upper(),
     )
 
     return SheetReport(

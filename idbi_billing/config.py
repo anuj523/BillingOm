@@ -121,8 +121,8 @@ COL_HEADERS = [
     "Discount %", "Discounted Unit Cost", "Monthly Cost Discounted",
     "Converted Monthly Cost", "Notes",
 ]
-COL_WIDTHS = [9.5, 27.2, 22.2, 34.7, 39.7, 66.7, 46.3,
-              11.8, 13.5, 20.5, 12.5, 21.8, 25.3, 24.5, 8.7]
+COL_WIDTHS = [7.0, 15.0, 19.0, 22.0, 24.0, 30.0, 31.0,
+              9.0, 11.5, 12.5, 8.5, 12.5, 13.5, 14.5, 6.5]
 
 NOTE_TEXT = (
     "Note:- Rows highlighted in orange are priced as per the finalised "
