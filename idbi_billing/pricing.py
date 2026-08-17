@@ -693,7 +693,10 @@ class Pricer:
             ep_h  = CUR.qty(f, "Endpoint-Hour")
             if ep_h < 1:
                 continue
-            nfw_qty = max(1, round(ep_h / ADDR_HRS_PER_MONTH / 2))
+            # Client-approved sheet prices per firewall ENDPOINT (each running
+            # endpoint = 1 BoM unit), not per pair of endpoints. e.g. 1488 hrs
+            # /730 = 2 endpoints -> qty 2.
+            nfw_qty = max(1, round(ep_h / ADDR_HRS_PER_MONTH))
             traf    = CUR.qty(f, "Traffic-GB")
             ep_desc = CUR.desc(f, "Endpoint-Hour")
             tr_desc = CUR.desc(f, "Traffic-GB")
@@ -701,8 +704,8 @@ class Pricer:
             row = Row(
                 service="Network Firewall",
                 additional="Network Firewall",
-                config=f"2 network firewall endpoints\n{ep_h:.2f} endpoint-hrs → {nfw_qty} firewall(s)\n{traf:.4f} GB traffic processed",
-                sku=(f"APS3-Endpoint-Hour - {ep_desc} ({ep_h:.2f} hrs, 2 endpoints per firewall → {nfw_qty} firewall)\n"
+                config=f"{nfw_qty} network firewall endpoint(s)\n{ep_h:.2f} endpoint-hrs → {nfw_qty} endpoint(s)\n{traf:.4f} GB traffic processed",
+                sku=(f"APS3-Endpoint-Hour - {ep_desc} ({ep_h:.2f} hrs → {nfw_qty} endpoint(s))\n"
                      f"APS3-Traffic-GB-Processed - {tr_desc} ({traf:.4f} GB)"),
                 qty=nfw_qty, i_formula=self._bom_formula("net_fw", 1),
                 discount=b["disc"], is_bom=True,
