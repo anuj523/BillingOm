@@ -93,3 +93,13 @@ The Section-D footer note always interpolates the sheet's own month
 The "Notes" column (and the Working Notes block) is rendered **only** when at
 least one row carries a note or a working note exists. With no notes, the sheet
 ends at "Converted Monthly Cost" (14 columns).
+
+## R7 — No billable service is silently dropped  *(v3.1 catch-all)*
+Every CUR `ProductName` with `CostBeforeTax > 0` that has **no dedicated builder**
+is billed by a catch-all at the non-BoM **8%** rate (one row per account/service),
+so unmodelled services (Route 53, CloudFront, Lambda, SNS, SQS, Secrets Manager,
+EFS, DynamoDB, …) can no longer vanish from the sheet. Zero-cost/free-tier lines
+stay excluded (R4). The catch-all does **not** touch usage types inside
+already-handled products — VPN (under "Amazon Virtual Private Cloud"), Transit
+Gateway priced as BoM, and RDS BoM family substitution still require their
+Section B BoM rates and are pending those inputs.

@@ -147,6 +147,34 @@ def _ec2_pricing(inst: str, vcpu: int, mem: int, os_cls: str, bom: dict):
     return None, 1.0, None
 
 
+# ProductName strings that already have a dedicated builder below. The catch-all
+# (_other_services) skips these and bills every OTHER ProductName found in the
+# CUR at the non-BoM 8% rate, so a service the engine doesn't explicitly model
+# is no longer silently dropped from the sheet (v3.1).
+HANDLED_PRODUCTS = {
+    "Amazon Elastic Compute Cloud",
+    "Amazon Simple Storage Service",
+    "Amazon Relational Database Service",
+    "Amazon Virtual Private Cloud",
+    "AWS Direct Connect",
+    "Elastic Load Balancing",
+    "AWS Network Firewall",
+    "Amazon Elastic Container Service",
+    "Amazon EC2 Container Registry (ECR)",
+    "Amazon Elastic Container Service for Kubernetes",
+    "Amazon OpenSearch Service",
+    "AWS Key Management Service",
+    "AWS WAF",
+    "AmazonCloudWatch",
+    "AWS Config",
+    "AWS CloudTrail",
+    "AWS Data Transfer",
+    "Amazon GuardDuty",
+    "AWS Cost Explorer",
+    "AWS Security Hub",
+}
+
+
 class Pricer:
     def __init__(self, cur_df, invoice, bom: dict, rate: float):
         self.li      = cur_df    # already filtered to allowed accounts DataFrame
@@ -280,6 +308,19 @@ class Pricer:
         # 26. Security Hub (non-BoM, if present)
         add_service("Security Hub", False,
                     self._security_hub(account_list))
+        # 27. Catch-all — any other billable service not modelled above, non-BoM
+        #     @8%, so nothing is silently dropped. Each distinct ProductName
+        #     becomes its own service group (preserving CUR order).
+        other_rows = self._other_services(account_list)
+        grouped: dict[str, list] = {}
+        order: list[str] = []
+        for row in other_rows:
+            if row.service not in grouped:
+                grouped[row.service] = []
+                order.append(row.service)
+            grouped[row.service].append(row)
+        for svc in order:
+            add_service(svc, False, grouped[svc])
 
     # ── per-service builders ─────────────────────────────────────────────────
 
@@ -917,4 +958,49 @@ class Pricer:
             )
             row._aid = aid; row._aname = aname
             rows.append(row)
+        return rows
+
+    def _other_services(self, accts) -> list:
+        """
+        Catch-all (v3.1). Every ProductName that has no dedicated builder above
+        is billed here at the non-BoM 8% rate — one row per (account, service) —
+        so a service the engine doesn't explicitly model is never silently
+        dropped. Zero-cost / free-tier lines stay excluded (CostBeforeTax > 0),
+        consistent with R4.
+
+        Scope: this recovers WHOLE unmodelled services (e.g. Route 53,
+        CloudFront, Lambda, SNS, SQS, Secrets Manager, EFS, DynamoDB, ...). It
+        deliberately does NOT touch usage types inside already-handled products
+        (VPN under "Amazon Virtual Private Cloud", RDS BoM substitution, Transit
+        Gateway as BoM) — those need the Section B BoM rates and are priced by
+        their own builders once those BoM lines are supplied. Applied on every
+        tab.
+        """
+        rows = []
+        for aid, aname in accts:
+            frame = self.li[self.li["_acct"] == aid]
+            frame = frame[frame["CostBeforeTax"] > 0]
+            if frame.empty:
+                continue
+            for prod, grp in frame.groupby("ProductName"):
+                prod = str(prod).strip()
+                if not prod or prod == "nan" or prod in HANDLED_PRODUCTS:
+                    continue
+                cbt = float(grp["CostBeforeTax"].sum())
+                if cbt < 1e-6:
+                    continue
+                usage = "; ".join(sorted(set(
+                    str(u).split(":")[-1] for u in grp["UsageType"].dropna()
+                    if str(u).strip()
+                )))[:120]
+                row = Row(
+                    service=prod,
+                    additional="Billed at 8% off public pricing (no BoM line configured for this service)",
+                    config=usage or "See SKU",
+                    sku="\n".join(CUR.skus(grp)),
+                    qty=1, i_formula=f"={round(cbt, 4)}",
+                    discount=NON_BOM_DISC, is_bom=False,
+                )
+                row._aid = aid; row._aname = aname
+                rows.append(row)
         return rows
