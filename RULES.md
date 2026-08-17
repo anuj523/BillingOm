@@ -108,3 +108,8 @@ Section B BoM rates and are pending those inputs.
 Each running firewall endpoint = 1 BoM unit: `qty = max(1, round(endpoint_hours/730))`.
 The earlier "2 endpoints = 1 firewall" rule under-billed by half (e.g. 1488 endpoint-hrs
 = 2 endpoints → qty 2, ₹46,314.72, not qty 1 / ₹23,157.36).
+
+## R9 — Site-to-Site VPN (BoM line 35)
+VPN usage (APS3-VPN-Usage-Hours under "Amazon Virtual Private Cloud") is a BoM
+row: ₹10,035 per connection per month, discount 78%. Connections =
+max(1, round(VPN-usage-hours / 730)). e.g. 1488 hrs → 2 connections → ₹4,415.40.

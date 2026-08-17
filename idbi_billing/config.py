@@ -75,6 +75,9 @@ BOM = {
     # Costing: (((19912.5/1000) * actual_mbps) * quantity) / rate ; discount 75%.
     "direct_connect": {"unit": 19912.5, "disc": 0.75, "basis": 1000, "line": 40,
                        "name": "Dedicated DC-Cloud connect leased line charges"},
+    # Site-to-Site VPN (BoM line 35) — per connection per month, disc 78%.
+    "vpn": {"unit": 10035.0, "disc": 0.78, "basis": 1, "line": 35,
+            "name": "Site-to-Site VPN"},
 }
 
 # ── EBS slab helper ─────────────────────────────────────────────────────────

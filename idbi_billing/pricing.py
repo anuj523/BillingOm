@@ -263,6 +263,9 @@ class Pricer:
         # 11. Direct Connect (BoM leased-line, disc 75%) — point 2
         add_service("Direct Connect", True,
                     self._direct_connect(account_list, res))
+        # 11b. Site-to-Site VPN (BoM line 35, disc 78%)
+        add_service("VPN Connection", True,
+                    self._vpn(account_list))
         # 12. Application Load Balancing (BoM)
         add_service("Application load balancing", True,
                     self._alb(account_list))
@@ -661,6 +664,33 @@ class Pricer:
                     unit = m.group(2).lower()
                     return (val * 1000 if unit.startswith("g") else val), "parsed"
         return 1000.0, "default"
+
+    def _vpn(self, accts) -> list:
+        """
+        Site-to-Site VPN — BoM line 35 (₹10,035 per connection per month, 78%).
+        VPN usage sits under "Amazon Virtual Private Cloud" as
+        APS3-VPN-Usage-Hours; number of connections = round(hours / 730), min 1.
+        """
+        rows = []
+        for aid, aname in accts:
+            f = self._f(aid, "Amazon Virtual Private Cloud")
+            vpn = f[f["UsageType"].str.contains("VPN-Usage", case=False, na=False)]
+            hrs = float(vpn["UsageQuantity"].sum())
+            if hrs < 1 or float(vpn["CostBeforeTax"].sum()) < 1e-6:
+                continue
+            n_conn = max(1, round(hrs / ADDR_HRS_PER_MONTH))
+            b = self.bom["vpn"]
+            row = Row(
+                service="VPN Connection",
+                additional="Site-to-Site VPN",
+                config=f"VPN Connection per month\n{hrs:.0f} connection-hrs → {n_conn} connection(s)",
+                sku=f"Number of Site-to-Site VPN Connections ({n_conn}), APS3-VPN-Usage-Hours ({hrs:.0f} hrs)",
+                qty=n_conn, i_formula=self._bom_formula("vpn", 1),
+                discount=b["disc"], is_bom=True,
+            )
+            row._aid = aid; row._aname = aname
+            rows.append(row)
+        return rows
 
     def _alb(self, accts) -> list:
         rows = []
