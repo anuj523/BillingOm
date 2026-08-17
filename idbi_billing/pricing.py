@@ -217,7 +217,35 @@ class Pricer:
     def price_accounts(self, account_list: list[tuple[str, str]]) -> PricingResult:
         res = PricingResult()
         self._build_all(account_list, res)
+        self._grossup_nonbom(res, account_list)
         return res
+
+    def _grossup_nonbom(self, res, account_list):
+        """
+        Non-BoM rows must be priced from the invoice's GROSS charges, then have
+        the 8% applied (per the rule book). The CUR's CostBeforeTax is already
+        NET of the AWS Distribution Program Discount (~12%), so pricing straight
+        from it double-discounts and under-bills every non-BoM row. Here we
+        scale each non-BoM row's indicative USD value back up to gross using the
+        account's own gross/net ratio (invoice gross ÷ CUR net). BoM rows are
+        untouched.
+        """
+        import re as _re
+        num = _re.compile(r"^=(-?\d+(?:\.\d+)?)$")
+        for aid, _ in account_list:
+            gross = self.inv.total_charges(aid) if self.inv else 0.0
+            net   = float(self.li[self.li["_acct"] == aid]["CostBeforeTax"].sum())
+            if gross <= 0 or net <= 1e-6:
+                continue
+            factor = gross / net
+            if abs(factor - 1.0) < 1e-9:
+                continue
+            for _sn, _svc, is_bom, row in res.rows:
+                if is_bom or getattr(row, "_aid", None) != aid:
+                    continue
+                m = num.match(row.i_formula.strip())
+                if m:
+                    row.i_formula = f"={round(float(m.group(1)) * factor, 4)}"
 
     def _build_all(self, account_list, res):
         """Build all service groups in canonical order."""

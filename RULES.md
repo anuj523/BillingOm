@@ -113,3 +113,11 @@ The earlier "2 endpoints = 1 firewall" rule under-billed by half (e.g. 1488 endp
 VPN usage (APS3-VPN-Usage-Hours under "Amazon Virtual Private Cloud") is a BoM
 row: ₹10,035 per connection per month, discount 78%. Connections =
 max(1, round(VPN-usage-hours / 730)). e.g. 1488 hrs → 2 connections → ₹4,415.40.
+
+## R10 — Non-BoM rows price from invoice GROSS, not CUR net
+The CUR's CostBeforeTax is already net of the AWS Distribution Program Discount
+(~12%). Non-BoM rows are "8% off public (gross) pricing", so pricing them from
+CUR net double-discounts and under-bills. Each non-BoM row's indicative USD is
+scaled up by the account's gross/net ratio (invoice gross ÷ CUR net) before the
+8% is applied. Fixes Transit Gateway, Route 53, CloudTrail, CloudWatch, Config,
+etc. to match the approved sheet exactly.
