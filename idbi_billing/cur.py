@@ -7,17 +7,18 @@ from __future__ import annotations
 import pandas as pd
 
 
-def read_tabular(path_or_buffer, skiprows=0, dtype=None) -> pd.DataFrame:
+def read_tabular(path_or_buffer, **kwargs) -> pd.DataFrame:
     """
     Read a CSV *or* Excel file into a DataFrame, auto-detecting the format.
     Detection uses the filename/extension when available, and falls back to a
     content sniff (Excel files start with the ZIP magic 'PK') for buffers with
-    no usable name. Lets every input accept both .csv and .xlsx/.xls.
+    no usable name. Any pandas kwargs (dtype, header, skiprows, ...) pass
+    through. Lets every input accept both .csv and .xlsx/.xls.
     """
     name = str(getattr(path_or_buffer, "name", path_or_buffer) or "").lower()
     is_excel = name.endswith((".xlsx", ".xls", ".xlsm"))
     if not is_excel and not name.endswith(".csv"):
-        # Unknown/again ambiguous name (e.g. a NamedTemporaryFile) — sniff bytes.
+        # Ambiguous name (e.g. a NamedTemporaryFile) — sniff the first bytes.
         try:
             if hasattr(path_or_buffer, "read"):
                 pos = path_or_buffer.tell()
@@ -30,8 +31,8 @@ def read_tabular(path_or_buffer, skiprows=0, dtype=None) -> pd.DataFrame:
         except Exception:
             is_excel = False
     if is_excel:
-        return pd.read_excel(path_or_buffer, skiprows=skiprows, dtype=dtype)
-    return pd.read_csv(path_or_buffer, skiprows=skiprows, dtype=dtype)
+        return pd.read_excel(path_or_buffer, **kwargs)
+    return pd.read_csv(path_or_buffer, **kwargs)
 
 
 class CUR:

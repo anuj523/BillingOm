@@ -55,16 +55,83 @@ def _get_ec2_pricing(inst: str, vcpu: int, mem: int, os_cls: str, bom: dict):
     return None, 1.0, None
 
 
+def _read_raw_grid(path_or_buffer) -> pd.DataFrame:
+    """
+    Read a CSV or Excel file into a headerless, string-only DataFrame that is
+    tolerant of ragged rows (AWS Calculator exports have short preamble rows
+    followed by wider data rows, which trips pandas.read_csv). Excel goes
+    through read_excel(header=None); CSV is parsed with the stdlib csv module
+    and padded to a rectangle.
+    """
+    name = str(getattr(path_or_buffer, "name", path_or_buffer) or "").lower()
+    is_excel = name.endswith((".xlsx", ".xls", ".xlsm"))
+    if not is_excel and not name.endswith(".csv"):
+        try:
+            if hasattr(path_or_buffer, "read"):
+                pos = path_or_buffer.tell(); head = path_or_buffer.read(2); path_or_buffer.seek(pos)
+            else:
+                with open(path_or_buffer, "rb") as fh: head = fh.read(2)
+            is_excel = head[:2] == b"PK"
+        except Exception:
+            is_excel = False
+    if is_excel:
+        return pd.read_excel(path_or_buffer, header=None, dtype=str).fillna("")
+
+    import csv as _csv, io as _io
+    if hasattr(path_or_buffer, "read"):
+        pos = path_or_buffer.tell()
+        raw = path_or_buffer.read(); path_or_buffer.seek(pos)
+        text = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+        fh = _io.StringIO(text); close = False
+    else:
+        fh = open(path_or_buffer, newline="", encoding="utf-8", errors="replace"); close = True
+    try:
+        rows = list(_csv.reader(fh))
+    finally:
+        if close:
+            fh.close()
+    maxc = max((len(r) for r in rows), default=1)
+    rows = [r + [""] * (maxc - len(r)) for r in rows]
+    return pd.DataFrame(rows).fillna("")
+
+
 def _parse_csv(path_or_buffer):
-    df = read_tabular(path_or_buffer, skiprows=7, dtype=str)
-    df.columns = df.columns.str.strip()
+    # AWS Pricing Calculator exports carry a variable number of preamble rows
+    # before the real header (and Excel vs CSV exports differ), so instead of a
+    # fixed skiprows we read raw (ragged-safe) and locate the header row.
+    raw = _read_raw_grid(path_or_buffer)
+
+    header_idx = None
+    for i in range(min(40, len(raw))):
+        vals = [str(x).strip() for x in raw.iloc[i].tolist()]
+        if "Service" in vals:
+            header_idx = i
+            # Prefer a row that also has the config column (the true header).
+            if any("Configuration" in v for v in vals):
+                break
+
+    if header_idx is None:
+        raise ValueError(
+            "This doesn't look like an AWS Pricing Calculator export — no "
+            "'Service' column was found. Please upload the Calculator CSV/Excel "
+            "export (the file with Service / Configuration summary / Monthly "
+            "columns), not the BoM or a generated bill."
+        )
+
+    cols = [str(x).strip() for x in raw.iloc[header_idx].tolist()]
+    df = raw.iloc[header_idx + 1:].copy()
+    df.columns = cols
+    df = df.reset_index(drop=True)
+    # Drop fully-empty trailing rows.
+    df = df[~(df == "").all(axis=1)].copy()
+
     for col in ("Monthly", "First 12 months total"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-    # filter to group rows
+    # filter to group rows (when the Group hierarchy column is present)
     grp_col = next((c for c in df.columns if "Group hierarchy" in c), None)
     if grp_col:
-        df = df[df[grp_col].notna()].copy()
+        df = df[df[grp_col].astype(str).str.strip() != ""].copy()
     return df
 
 
@@ -87,10 +154,22 @@ def build_estimate(
     df  = _parse_csv(csv_path)
     os.makedirs(out_dir, exist_ok=True)
 
-    ec2 = df[df["Service"].str.strip() == "Amazon EC2"].copy()
+    # Required columns from the Calculator export.
+    if "Service" not in df.columns:
+        raise ValueError(
+            "The uploaded estimate file has no 'Service' column after parsing. "
+            "Please upload the AWS Pricing Calculator CSV/Excel export."
+        )
+    if "Configuration summary" not in df.columns:
+        # Some exports label it differently; try a close match, else blank it.
+        alt = next((c for c in df.columns if "onfiguration" in c), None)
+        df["Configuration summary"] = df[alt] if alt else ""
+
+    svc = df["Service"].astype(str).str.strip()
+    ec2 = df[svc == "Amazon EC2"].copy()
     ec2[["os_","inst","base"]] = ec2["Configuration summary"].apply(
         lambda c: pd.Series(_parse_instance(str(c))))
-    non_ec2 = df[df["Service"].str.strip() != "Amazon EC2"].copy()
+    non_ec2 = df[svc != "Amazon EC2"].copy()
 
     rows = []    # (sn, addl, cfg, sku, qty, I_formula, disc, is_bom, note_n)
     notes = []   # (n, text)
