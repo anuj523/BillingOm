@@ -121,3 +121,12 @@ CUR net double-discounts and under-bills. Each non-BoM row's indicative USD is
 scaled up by the account's gross/net ratio (invoice gross ÷ CUR net) before the
 8% is applied. Fixes Transit Gateway, Route 53, CloudTrail, CloudWatch, Config,
 etc. to match the approved sheet exactly.
+
+## R11 — BoM compute eligibility (client families rule)
+BoM compute pricing applies ONLY to m5/m6/c5/c6 families (M5↔M6 and C5↔C6 are
+interchangeable). Intel "i" variants (family ends in "i", e.g. m6i) are billed
+at standard public price / 8%. All non-Windows instances are treated as RHEL
+(BoM has only Windows + RHEL compute lines). A qualifying instance is matched to
+a BoM line by exact (OS, vCPU, GB); anything not listed → 8% (Section D). One row
+per instance type (same family+vCPU+memory groups; otherwise separate). Compute
+rows are grouped into "Windows OS" / "RHEL OS" service blocks.

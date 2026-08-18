@@ -80,6 +80,25 @@ def _os_class(desc: str) -> str:
     return "linux"
 
 
+# Client rule: only these families qualify for BoM compute pricing.
+# M5<->M6 and C5<->C6 are interchangeable (they share the same vCPU/GB BoM
+# lines), so the qualifying base-family set is simply {m5, m6, c5, c6}.
+_BOM_COMPUTE_FAMILIES = {"m5", "m6", "c5", "c6"}
+
+
+def _bom_eligible(inst: str) -> bool:
+    """
+    True if the instance may be priced from the BoM compute lines.
+    Only m5/m6/c5/c6 families qualify. Intel 'i' variants (family string ends
+    in 'i', e.g. m6i, c6i) are excluded and billed at standard public price /
+    8% (Section-D), per the client's rule.
+    """
+    fam = inst.split(".")[0]              # raw family token, e.g. "m6i", "c6a"
+    if fam.endswith("i"):
+        return False
+    return _base_family(inst) in _BOM_COMPUTE_FAMILIES
+
+
 def instance_specs(inst_type: str) -> tuple[int, int]:
     """
     Map an instance type string to (vcpu, mem_gb).
@@ -120,30 +139,22 @@ def instance_specs(inst_type: str) -> tuple[int, int]:
 
 def _ec2_pricing(inst: str, vcpu: int, mem: int, os_cls: str, bom: dict):
     """
-    Returns (bom_key_or_None, multiplier, anchor_desc).
-    multiplier > 1 means the instance is larger than the anchor.
+    Client rules for BoM compute substitution:
+      * All non-Windows instances are treated as RHEL — the BoM only has Windows
+        and RHEL compute lines ("Considering OS as RedHat").
+      * Only m5/m6/c5/c6 families qualify (M5<->M6, C5<->C6 interchangeable);
+        Intel 'i' variants are excluded and stay at 8%.
+      * A qualifying instance is matched to a BoM line by exact (OS, vCPU, GB).
+        Anything not listed falls to 8% per the Section-D note.
+    Returns (bom_key_or_None, multiplier, anchor_desc). multiplier is always 1.0
+    (no cross-size scaling — unlisted sizes go to 8%).
     """
-    key = EC2_EXACT.get((os_cls, vcpu, mem))
+    os_norm = "win" if os_cls == "win" else "rhel"   # all Linux -> RHEL
+    if not _bom_eligible(inst):
+        return None, 1.0, None
+    key = EC2_EXACT.get((os_norm, vcpu, mem))
     if key:
         return key, 1.0, None
-
-    fam = _base_family(inst)
-    if os_cls == "rhel":
-        if fam == "r6":
-            anchor_key, anchor_v = EC2_ANCHOR[("rhel", "r6")]
-            return anchor_key, vcpu / anchor_v, "r6a.xlarge anchor (4 vCPU)"
-        if fam == "m6":
-            anchor_key, anchor_v = EC2_ANCHOR[("rhel", "m6")]
-            return anchor_key, vcpu / anchor_v, "m6g.4xlarge anchor (16 vCPU)"
-    if os_cls == "win":
-        # Point 1: Windows m5a AND m6a scale through the m5a BoM lines.
-        if fam in WIN_M_FAMILIES:
-            av = min((v for v in WIN_M5A_ANCHORS if v <= vcpu or v == 16),
-                     key=lambda x: abs(x - vcpu))
-            ak = WIN_M5A_ANCHORS[av]
-            return ak, vcpu / av, f"m5a anchor ({av} vCPU)"
-        # Windows r6 (and anything else) -> no BoM, stays 8%.
-        return None, 1.0, None
     return None, 1.0, None
 
 
@@ -240,8 +251,8 @@ class Pricer:
             factor = gross / net
             if abs(factor - 1.0) < 1e-9:
                 continue
-            for _sn, _svc, is_bom, row in res.rows:
-                if is_bom or getattr(row, "_aid", None) != aid:
+            for _sn, _svc, _is_bom, row in res.rows:
+                if getattr(row, "is_bom", False) or getattr(row, "_aid", None) != aid:
                     continue
                 m = num.match(row.i_formula.strip())
                 if m:
@@ -258,9 +269,19 @@ class Pricer:
                 res.rows.append((sn[0], svc_name, is_bom, row))
             sn[0] += 1
 
-        # 1. Compute (Linux / RHEL / Windows)
-        add_service("Compute services – Linux OS", False,
-                    self._compute(account_list, res))
+        # 1. Compute — split into Windows OS / RHEL OS groups (by row label),
+        #    each row already carries is_bom, so mixed BoM+8% rows coexist.
+        comp_rows = self._compute(account_list, res)
+        comp_grouped: dict[str, list] = {}
+        comp_order: list[str] = []
+        for row in comp_rows:
+            if row.service not in comp_grouped:
+                comp_grouped[row.service] = []
+                comp_order.append(row.service)
+            comp_grouped[row.service].append(row)
+        for svc in comp_order:
+            grp = comp_grouped[svc]
+            add_service(svc, any(r.is_bom for r in grp), grp)
         # 2. Block SSD gp3 (BoM slab)
         add_service("Block SSD Storage", True,
                     self._block_ssd(account_list))
@@ -393,8 +414,9 @@ class Pricer:
                     ))
                     formula = self._bom_formula(bkey, 1, mult)
                     os_label = "Windows" if os_cls == "win" else "Red Hat Enterprise Linux"
+                    os_svc   = "Compute services – Windows OS" if os_cls == "win" else "Compute services – RHEL OS"
                     acct_rows.append(Row(
-                        service="Compute services – Linux OS",
+                        service=os_svc,
                         additional=f"On-Demand {os_label} instance (BoM substitution - Note {nn})",
                         config=f"Chosen instance: {inst_type}  |  {vcpu} vCPU  |  {mem} GiB Memory  |  {hours:.2f} hrs",
                         sku=f"Chosen instance: {inst_type}  |  Family:{_base_family(inst_type)}  |  {vcpu}vCPU  |  {mem} GiB Memory",
@@ -402,9 +424,10 @@ class Pricer:
                     ))
                 else:
                     os_label = "Windows" if os_cls == "win" else "Linux/Unix"
+                    os_svc   = "Compute services – Windows OS" if os_cls == "win" else "Compute services – RHEL OS"
                     inst_desc = str(grp["ItemDescription"].iloc[0])[:65] if len(grp) else ""
                     acct_rows.append(Row(
-                        service="Compute services – Linux OS",
+                        service=os_svc,
                         additional=f"1. {os_label}",
                         config=f"Chosen instance: {inst_type}  |  {vcpu} vCPU  |  {mem} GiB Memory  |  {hours:.2f} hrs",
                         sku=f"APS3-BoxUsage:{inst_type} - {inst_desc} ({hours:.2f} hrs)",
