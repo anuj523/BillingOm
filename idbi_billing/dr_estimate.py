@@ -106,8 +106,8 @@ def build_estimate(
         unit = b["unit"] * mult
         basis = b["basis"]
         if basis == 1:
-            return f"=(({unit:.6f}*H{{r}}))/{rate}"
-        return f"=((({unit:.6f}/{basis})*{round(consumption,4)})*H{{r}})/{rate}"
+            return f"=(({unit:.6f}*G{{r}}))/{rate}"
+        return f"=((({unit:.6f}/{basis})*{round(consumption,4)})*G{{r}})/{rate}"
 
     # ── EC2 rows (grouped by OS then instance type) ──────────────────────
     for os_label in ["RHEL", "Windows"]:
