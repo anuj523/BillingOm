@@ -14,6 +14,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 from .bom    import load as load_bom
+from .cur    import read_tabular
 from .config import (
     BOM as BOM_FALLBACK, ebs_key, EC2_EXACT, EC2_ANCHOR, WIN_M5A_ANCHORS,
     ORANGE, GREEN, HDR_BLUE, COL_WIDTHS, NOTE_TEXT, NON_BOM_DISC,
@@ -55,7 +56,7 @@ def _get_ec2_pricing(inst: str, vcpu: int, mem: int, os_cls: str, bom: dict):
 
 
 def _parse_csv(path_or_buffer):
-    df = pd.read_csv(path_or_buffer, skiprows=7, dtype=str)
+    df = read_tabular(path_or_buffer, skiprows=7, dtype=str)
     df.columns = df.columns.str.strip()
     for col in ("Monthly", "First 12 months total"):
         if col in df.columns:

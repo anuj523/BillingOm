@@ -17,6 +17,10 @@ st.set_page_config(
 def _tmp_save(uploaded, suffix=""):
     if uploaded is None:
         return None
+    # Preserve the uploaded file's real extension (so an .xlsx upload isn't
+    # saved as .csv). Fall back to any explicit suffix, then to the name's ext.
+    ext = os.path.splitext(getattr(uploaded, "name", "") or "")[1]
+    suffix = ext or suffix or ".bin"
     path = tempfile.NamedTemporaryFile(delete=False, suffix=suffix).name
     with open(path, "wb") as f:
         f.write(uploaded.getbuffer())
@@ -81,7 +85,7 @@ with tab_dbd:
 """)
 
     col1, col2, col3 = st.columns(3)
-    with col1: cur_f  = st.file_uploader("CUR CSV",        type=["csv"], key="dbd_cur")
+    with col1: cur_f  = st.file_uploader("CUR CSV",        type=["csv","xlsx","xls"], key="dbd_cur")
     with col2: inv_f  = st.file_uploader("Invoice PDF",    type=["pdf"], key="dbd_inv")
     with col3: bom_f  = st.file_uploader("Section B BoM",  type=["xlsx"],key="dbd_bom")
 
@@ -127,7 +131,7 @@ with tab_dr:
 """)
 
     col1, col2 = st.columns(2)
-    with col1: dr_csv  = st.file_uploader("Pricing Calculator CSV", type=["csv"],  key="dr_csv")
+    with col1: dr_csv  = st.file_uploader("Pricing Calculator CSV", type=["csv","xlsx","xls"],  key="dr_csv")
     with col2: dr_bom  = st.file_uploader("Section B BoM (xlsx)",   type=["xlsx"], key="dr_bom")
 
     col3, col4 = st.columns(2)
@@ -184,7 +188,7 @@ Same rules as DBD:
 """)
 
     col1, col2, col3 = st.columns(3)
-    with col1: itd_cur = st.file_uploader("CUR CSV",       type=["csv"],  key="itd_cur")
+    with col1: itd_cur = st.file_uploader("CUR CSV",       type=["csv","xlsx","xls"],  key="itd_cur")
     with col2: itd_inv = st.file_uploader("Invoice PDF",   type=["pdf"],  key="itd_inv")
     with col3: itd_bom = st.file_uploader("Section B BoM", type=["xlsx"], key="itd_bom")
 
